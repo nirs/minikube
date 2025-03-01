@@ -40,6 +40,7 @@ import (
 	"github.com/docker/machine/libmachine/mcnutils"
 	"github.com/docker/machine/libmachine/ssh"
 	"github.com/docker/machine/libmachine/state"
+	"github.com/nirs/vmnet-helper-go"
 	"github.com/pkg/errors"
 
 	"k8s.io/klog/v2"
@@ -217,6 +218,24 @@ func (d *Driver) Create() error {
 func (d *Driver) Start() error {
 	machineDir := filepath.Join(d.StorePath, "machines", d.GetMachineName())
 
+	helperSock, vfkitSock, err := vmnet.Socketpair()
+	if err != nil {
+		return err
+	}
+	defer helperSock.Close()
+	defer vfkitSock.Close()
+
+	helper := vmnet.NewHelper(vmnet.HelperOptions{
+		Fd:          helperSock,
+		InterfaceID: vmnet.UUIDFromName("io.k8s.sigs.minikube." + d.MachineName),
+		// XXX Add Pidfile
+	})
+	if err := helper.Start(); err != nil {
+		return err
+	}
+
+	d.MACAddress = helper.MACAddress()
+
 	var startCmd []string
 
 	startCmd = append(startCmd,
@@ -228,7 +247,7 @@ func (d *Driver) Start() error {
 		"--device", fmt.Sprintf("virtio-blk,path=%s", isoPath))
 
 	startCmd = append(startCmd,
-		"--device", fmt.Sprintf("virtio-net,nat,mac=%s", d.MACAddress))
+		"--device", fmt.Sprintf("virtio-net,fd=%d,mac=%s", vfkitSock.Fd(), d.MACAddress))
 
 	startCmd = append(startCmd,
 		"--device", "virtio-rng")

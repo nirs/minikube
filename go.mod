@@ -46,6 +46,7 @@ require (
 	github.com/mitchellh/go-ps v1.0.0
 	github.com/moby/hyperkit v0.0.0-20210108224842-2f061e447e14
 	github.com/moby/patternmatcher v0.6.0
+	github.com/nirs/vmnet-helper-go v0.0.0-20250301234912-cecc3ba6359a
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/runc v1.2.4
