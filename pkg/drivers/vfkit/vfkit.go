@@ -53,10 +53,11 @@ import (
 )
 
 const (
-	isoFilename    = "boot2docker.iso"
-	pidFileName    = "vfkit.pid"
-	sockFilename   = "vfkit.sock"
-	defaultSSHUser = "docker"
+	isoFilename            = "boot2docker.iso"
+	vfkitPidfileName       = "vfkit.pid"
+	vmnetHelperPidfileName = "vmnet-helper.pid"
+	sockFilename           = "vfkit.sock"
+	defaultSSHUser         = "docker"
 )
 
 // Driver is the machine driver for vfkit (Virtualization.framework)
@@ -119,7 +120,7 @@ func (d *Driver) GetSSHUsername() string {
 }
 
 func (d *Driver) GetURL() (string, error) {
-	if _, err := os.Stat(d.pidfilePath()); err != nil {
+	if _, err := os.Stat(d.vfkitPidfilePath()); err != nil {
 		return "", nil
 	}
 	ip, err := d.GetIP()
@@ -145,21 +146,65 @@ func checkPid(pid int) error {
 	return process.Signal(syscall.Signal(0))
 }
 
+func (d *Driver) readPidfile(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return -1, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return -1, err
+	}
+	return pid, nil
+}
+
+// GetState returns driver state. Since vfkit driver may use 2 processes
+// (vmnet-helper, vfkit), this returns combined state of both processes.
 func (d *Driver) GetState() (state.State, error) {
-	if _, err := os.Stat(d.pidfilePath()); err != nil {
-		return state.Stopped, nil
+	helperState, helperErr := d.getVmnetHelperState()
+	vfkitState, vfkitErr := d.getVfkitState()
+	// If one is running, we need to treat state as running, nedeed by Stop(),
+	// Remove(), and Restart().
+	if helperState == state.Running || vfkitState == state.Running {
+		return state.Running, nil
 	}
-	p, err := os.ReadFile(d.pidfilePath())
-	if err != nil {
-		return state.Error, err
+	if helperState == state.Error || vfkitState == state.Error {
+		return state.Error, fmt.Errorf("vfkit: %w, vmnet-helper: %w", vfkitErr, helperErr)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(p)))
+	// We can have many combinations (state.None, state.Stopped) of the 2
+	// states. Letss simplify by treating vfkit state as the main state.
+	return vfkitState, nil
+}
+
+func (d *Driver) getVmnetHelperState() (state.State, error) {
+	path := d.vmnetHelperPidfilePath()
+	pid, err := d.readPidfile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return state.Stopped, nil
+		}
 		return state.Error, err
 	}
 	if err := checkPid(pid); err != nil {
 		// No pid, remove pidfile
-		os.Remove(d.pidfilePath())
+		os.Remove(path)
+		return state.Stopped, nil
+	}
+	return state.Running, nil
+}
+
+func (d *Driver) getVfkitState() (state.State, error) {
+	path := d.vfkitPidfilePath()
+	pid, err := d.readPidfile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return state.Stopped, nil
+		}
+		return state.Error, err
+	}
+	if err := checkPid(pid); err != nil {
+		// No pid, remove pidfile
+		os.Remove(path)
 		return state.Stopped, nil
 	}
 	ret, err := d.GetVFKitState()
@@ -216,8 +261,6 @@ func (d *Driver) Create() error {
 }
 
 func (d *Driver) Start() error {
-	machineDir := filepath.Join(d.StorePath, "machines", d.GetMachineName())
-
 	helperSock, vfkitSock, err := vmnet.Socketpair()
 	if err != nil {
 		return err
@@ -225,16 +268,73 @@ func (d *Driver) Start() error {
 	defer helperSock.Close()
 	defer vfkitSock.Close()
 
-	helper := vmnet.NewHelper(vmnet.HelperOptions{
-		Fd:          helperSock,
-		InterfaceID: vmnet.UUIDFromName("io.k8s.sigs.minikube." + d.MachineName),
-		// XXX Add Pidfile
-	})
-	if err := helper.Start(); err != nil {
+	if err := d.startVmnetHelper(helperSock); err != nil {
 		return err
 	}
 
+	if err := d.startVfkit(vfkitSock); err != nil {
+		d.stopVmnetHelper()
+		return err
+	}
+
+	if err := d.setupIP(d.MACAddress); err != nil {
+		return err
+	}
+
+	log.Infof("Waiting for VM to start (ssh -p %d docker@%s)...", d.SSHPort, d.IPAddress)
+
+	return WaitForTCPWithDelay(fmt.Sprintf("%s:%d", d.IPAddress, d.SSHPort), time.Second)
+}
+
+// startVMnetHelper stats the vmnet-helper child process when using shared or
+// bridged network using helperSock. Upon successful start, d.MACAddress
+// is set using the mac address assigned by the vmnet framework.
+func (d *Driver) startVmnetHelper(helperSock *os.File) error {
+	options := vmnet.HelperOptions{
+		Fd:          helperSock,
+		InterfaceID: vmnet.UUIDFromName("io.k8s.sigs.minikube." + d.MachineName),
+		Pidfile:     d.vmnetHelperPidfilePath(),
+	}
+
+	helper := vmnet.NewHelper(options)
+	if err := helper.Start(); err != nil {
+		return err
+	}
+	// XXX log child process pid
+	log.Infof("Started vmnet-helper for machine %q", d.MachineName)
+
 	d.MACAddress = helper.MACAddress()
+	log.Infof("Machine %q got MAC address %q", d.MachineName, d.MACAddress)
+
+	return nil
+}
+
+func (d *Driver) stopVmnetHelper() error {
+	path := d.vmnetHelperPidfilePath()
+	pid, err := d.readPidfile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	if err := process.Signal(syscall.Signal(syscall.SIGTERM)); err != nil {
+		if err != os.ErrProcessDone {
+			return err
+		}
+	}
+	os.Remove(path)
+	return nil
+}
+
+// startVfkit starts the vfkit child process. vfkitSock is required when using
+// shared or bridged network.
+func (d *Driver) startVfkit(vfkitSock *os.File) error {
+	machineDir := filepath.Join(d.StorePath, "machines", d.GetMachineName())
 
 	var startCmd []string
 
@@ -279,17 +379,10 @@ func (d *Driver) Start() error {
 		return err
 	}
 	pid := cmd.Process.Pid
-	if err := os.WriteFile(d.pidfilePath(), []byte(fmt.Sprintf("%v", pid)), 0600); err != nil {
+	if err := os.WriteFile(d.vfkitPidfilePath(), []byte(fmt.Sprintf("%v", pid)), 0600); err != nil {
 		return err
 	}
-
-	if err := d.setupIP(d.MACAddress); err != nil {
-		return err
-	}
-
-	log.Infof("Waiting for VM to start (ssh -p %d docker@%s)...", d.SSHPort, d.IPAddress)
-
-	return WaitForTCPWithDelay(fmt.Sprintf("%s:%d", d.IPAddress, d.SSHPort), time.Second)
+	return nil
 }
 
 func (d *Driver) setupIP(mac string) error {
@@ -331,6 +424,9 @@ func isBootpdError(err error) bool {
 }
 
 func (d *Driver) Stop() error {
+	if err := d.stopVmnetHelper(); err != nil {
+		return err
+	}
 	if err := d.SetVFKitState("HardStop"); err != nil {
 		return err
 	}
@@ -386,6 +482,9 @@ func (d *Driver) extractKernel(isoPath string) error {
 }
 
 func (d *Driver) Kill() error {
+	if err := d.stopVmnetHelper(); err != nil {
+		return err
+	}
 	if err := d.SetVFKitState("HardStop"); err != nil {
 		return err
 	}
@@ -427,9 +526,14 @@ func (d *Driver) sockfilePath() string {
 	return filepath.Join(machineDir, sockFilename)
 }
 
-func (d *Driver) pidfilePath() string {
+func (d *Driver) vmnetHelperPidfilePath() string {
 	machineDir := filepath.Join(d.StorePath, "machines", d.GetMachineName())
-	return filepath.Join(machineDir, pidFileName)
+	return filepath.Join(machineDir, vmnetHelperPidfileName)
+}
+
+func (d *Driver) vfkitPidfilePath() string {
+	machineDir := filepath.Join(d.StorePath, "machines", d.GetMachineName())
+	return filepath.Join(machineDir, vfkitPidfileName)
 }
 
 // Make a boot2docker VM disk image.
