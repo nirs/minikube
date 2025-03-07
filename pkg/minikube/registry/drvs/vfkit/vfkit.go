@@ -26,6 +26,7 @@ import (
 	"github.com/docker/machine/libmachine/drivers"
 
 	"k8s.io/minikube/pkg/drivers/vfkit"
+	"k8s.io/minikube/pkg/drivers/vmnet"
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/download"
 	"k8s.io/minikube/pkg/minikube/driver"
@@ -51,6 +52,7 @@ func init() {
 }
 
 func configure(cfg config.ClusterConfig, n config.Node) (interface{}, error) {
+	// XXX Not needed when using vmnet-helper.
 	mac, err := generateMACAddress()
 	if err != nil {
 		return nil, fmt.Errorf("generating MAC address: %v", err)
@@ -69,6 +71,12 @@ func configure(cfg config.ClusterConfig, n config.Node) (interface{}, error) {
 		MACAddress:     mac,
 		Cmdline:        "",
 		ExtraDisks:     cfg.ExtraDisks,
+
+		// XXX Create only when using vmnet network.
+		VmnetHelper: &vmnet.Helper{
+			MachineName: config.MachineName(cfg, n),
+			StorePath:   localpath.MiniPath(),
+		},
 	}, nil
 }
 

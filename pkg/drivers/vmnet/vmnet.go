@@ -63,10 +63,10 @@ type interfaceInfo struct {
 func HelperAvailable() bool {
 	version, err := exec.Command("sudo", "--non-interactive", executablePath, "--version").Output()
 	if err != nil {
-		log.Debugf("Failed to run vmnet-helper: %w", executablePath, err)
+		log.Debugf("Failed to run vmnet-helper: %w", err)
 		return false
 	}
-	log.Debugf("Using vmnet-helper version %q", executablePath, version)
+	log.Debugf("Using vmnet-helper version %q", version)
 	return true
 }
 
