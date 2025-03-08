@@ -70,7 +70,7 @@ type Driver struct {
 	Cmdline        string
 	MACAddress     string
 	ExtraDisks     int
-
+	Network        string
 	// For network=vmnet-shared.
 	VmnetHelper *vmnet.Helper
 }

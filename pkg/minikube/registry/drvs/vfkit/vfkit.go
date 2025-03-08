@@ -52,13 +52,7 @@ func init() {
 }
 
 func configure(cfg config.ClusterConfig, n config.Node) (interface{}, error) {
-	// XXX Not needed when using vmnet-helper.
-	mac, err := generateMACAddress()
-	if err != nil {
-		return nil, fmt.Errorf("generating MAC address: %v", err)
-	}
-
-	return &vfkit.Driver{
+	driver := &vfkit.Driver{
 		BaseDriver: &drivers.BaseDriver{
 			MachineName: config.MachineName(cfg, n),
 			StorePath:   localpath.MiniPath(),
@@ -68,16 +62,28 @@ func configure(cfg config.ClusterConfig, n config.Node) (interface{}, error) {
 		DiskSize:       cfg.DiskSize,
 		Memory:         cfg.Memory,
 		CPU:            cfg.CPUs,
-		MACAddress:     mac,
 		Cmdline:        "",
 		ExtraDisks:     cfg.ExtraDisks,
+		Network:        cfg.Network,
+	}
 
-		// XXX Create only when using vmnet network.
-		VmnetHelper: &vmnet.Helper{
-			MachineName: config.MachineName(cfg, n),
-			StorePath:   localpath.MiniPath(),
-		},
-	}, nil
+	switch cfg.Network {
+	case "nat":
+		mac, err := generateMACAddress()
+		if err != nil {
+			return nil, fmt.Errorf("generating MAC address: %v", err)
+		}
+		driver.MACAddress = mac
+	case "vmnet-shared":
+		driver.VmnetHelper = &vmnet.Helper{
+			MachineName: driver.MachineName,
+			StorePath:   driver.StorePath,
+		}
+	default:
+		return nil, fmt.Errorf("unsupported network: %q", cfg.Network)
+	}
+
+	return driver, nil
 }
 
 func status() registry.State {

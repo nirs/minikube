@@ -173,6 +173,11 @@ func IsQEMU(name string) bool {
 	return name == QEMU2 || name == QEMU
 }
 
+// IsVFKit checks if the driver is vfkit
+func IsVFKit(name string) bool {
+	return name == VFKit
+}
+
 // IsVM checks if the driver is a VM
 func IsVM(name string) bool {
 	if IsKIC(name) || BareMetal(name) {
