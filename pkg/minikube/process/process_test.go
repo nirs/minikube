@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package process_test
+package process
 
 import (
 	"bufio"
@@ -26,18 +26,16 @@ import (
 	"runtime"
 	"testing"
 	"time"
-
-	"k8s.io/minikube/pkg/minikube/process"
 )
 
 var waitTimeout = 250 * time.Millisecond
 
 func TestPidfile(t *testing.T) {
 	pidfile := filepath.Join(t.TempDir(), "pid")
-	if err := process.WritePidfile(pidfile, 42); err != nil {
+	if err := WritePidfile(pidfile, 42); err != nil {
 		t.Fatal(err)
 	}
-	pid, err := process.ReadPidfile(pidfile)
+	pid, err := ReadPidfile(pidfile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +46,7 @@ func TestPidfile(t *testing.T) {
 
 func TestPidfileMissing(t *testing.T) {
 	pidfile := filepath.Join(t.TempDir(), "pid")
-	_, err := process.ReadPidfile(pidfile)
+	_, err := ReadPidfile(pidfile)
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -59,7 +57,7 @@ func TestPidfileInvalid(t *testing.T) {
 	if err := os.WriteFile(pidfile, []byte("invalid"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := process.ReadPidfile(pidfile)
+	_, err := ReadPidfile(pidfile)
 	if err == nil {
 		t.Fatal("parsing invalid pidfile did not fail")
 	}
@@ -78,21 +76,21 @@ func TestProcess(t *testing.T) {
 
 	t.Run("exists", func(t *testing.T) {
 		cmd := startProcess(t, sleep)
-		exists, err := process.Exists(cmd.Process.Pid, filepath.Base(sleep))
+		exists, err := Exists(cmd.Process.Pid, filepath.Base(sleep))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !exists {
 			t.Fatal("existing process not found")
 		}
-		exists, err = process.Exists(0xfffffffc, filepath.Base(sleep))
+		exists, err = Exists(0xfffffffc, filepath.Base(sleep))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if exists {
 			t.Fatal("process with non-existing pid found")
 		}
-		exists, err = process.Exists(cmd.Process.Pid, "no-such-executable")
+		exists, err = Exists(cmd.Process.Pid, "no-such-executable")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,12 +101,12 @@ func TestProcess(t *testing.T) {
 
 	t.Run("terminate", func(t *testing.T) {
 		cmd := startProcess(t, sleep)
-		err := process.Terminate(cmd.Process.Pid, filepath.Base(sleep))
+		err := Terminate(cmd.Process.Pid, filepath.Base(sleep))
 		if err != nil {
 			t.Fatal(err)
 		}
 		waitForTermination(t, cmd)
-		exists, err := process.Exists(cmd.Process.Pid, filepath.Base(sleep))
+		exists, err := Exists(cmd.Process.Pid, filepath.Base(sleep))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +117,7 @@ func TestProcess(t *testing.T) {
 
 	t.Run("terminate name mismatch", func(t *testing.T) {
 		cmd := startProcess(t, sleep)
-		err := process.Terminate(cmd.Process.Pid, "no-such-process")
+		err := Terminate(cmd.Process.Pid, "no-such-process")
 		if err == nil {
 			t.Fatalf("Signaled unrelated process")
 		}
@@ -133,12 +131,12 @@ func TestProcess(t *testing.T) {
 			t.Skip("no way to ignore termination on windows")
 		}
 		cmd := startProcess(t, noterm)
-		err := process.Terminate(cmd.Process.Pid, filepath.Base(noterm))
+		err := Terminate(cmd.Process.Pid, filepath.Base(noterm))
 		if err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(waitTimeout)
-		exists, err := process.Exists(cmd.Process.Pid, filepath.Base(noterm))
+		exists, err := Exists(cmd.Process.Pid, filepath.Base(noterm))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,12 +147,12 @@ func TestProcess(t *testing.T) {
 
 	t.Run("kill", func(t *testing.T) {
 		cmd := startProcess(t, noterm)
-		err := process.Kill(cmd.Process.Pid, filepath.Base(noterm))
+		err := Kill(cmd.Process.Pid, filepath.Base(noterm))
 		if err != nil {
 			t.Fatal(err)
 		}
 		waitForTermination(t, cmd)
-		exists, err := process.Exists(cmd.Process.Pid, filepath.Base(noterm))
+		exists, err := Exists(cmd.Process.Pid, filepath.Base(noterm))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +163,7 @@ func TestProcess(t *testing.T) {
 
 	t.Run("kill name mismatch", func(t *testing.T) {
 		cmd := startProcess(t, noterm)
-		err := process.Kill(cmd.Process.Pid, "no-such-process")
+		err := Kill(cmd.Process.Pid, "no-such-process")
 		if err == nil {
 			t.Fatalf("Killed unrelated process")
 		}
