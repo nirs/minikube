@@ -134,7 +134,7 @@ func configure(cc config.ClusterConfig, n config.Node) (interface{}, error) {
 		qemuCPU = "max"
 	case "arm64":
 		qemuMachine = "virt"
-		qemuCPU = "cortex-a72"
+		qemuCPU = "host"
 		// highmem=off needed for qemu 6.2.0 and lower, see https://patchwork.kernel.org/project/qemu-devel/patch/20201126215017.41156-9-agraf@csgraf.de/#23800615 for details
 		if runtime.GOOS == "darwin" {
 			qemu7 := semver.MustParse("7.0.0")
