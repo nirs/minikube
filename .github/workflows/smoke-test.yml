@@ -20,6 +20,9 @@ jobs:
           - driver: qemu
             os: macos-13
             network_flag: --network socket_vmnet
+          - driver: qemu
+            os: ubuntu-latest
+            network_flag: ""
           - driver: vfkit
             os: macos-13
             network_flag: --network vmnet-shared
@@ -100,6 +103,11 @@ jobs:
         run: |
           brew install qemu socket_vmnet
           HOMEBREW=$(which brew) && sudo ${HOMEBREW} services start socket_vmnet
+      - name: Install qemu (ubuntu)
+        if: matrix.os == 'ubuntu-latest' && matrix.driver == 'qemu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install qemu-system ovmf
       - name: Minikube Download only (iso/image)
         run:
           ./out/minikube start --download-only --driver ${{ matrix.driver }}
