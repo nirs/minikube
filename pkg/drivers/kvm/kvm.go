@@ -314,24 +314,6 @@ func (d *Driver) Start() error {
 		log.Debugf("starting domain XML:\n%s", domXML)
 	}
 
-	// libvirt/qemu creates a console log file owned by root:root and permissions 0600,
-	// so we pre-create it (and close it immediately), just to be able to read it later
-	logPath := consoleLogPath(*d)
-	f, err := os.Create(logPath)
-	if err != nil {
-		log.Debugf("failed to create console log file %q: %v", logPath, err)
-	} else {
-		f.Close()
-	}
-	// ensure console log file is cleaned up
-	defer func() {
-		if _, err := os.Stat(logPath); err == nil {
-			if err := os.Remove(logPath); err != nil {
-				log.Debugf("failed removing console log file %q: %v", logPath, err)
-			}
-		}
-	}()
-
 	if err := dom.Create(); err != nil {
 		return errors.Wrap(err, "creating domain")
 	}
