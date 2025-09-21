@@ -20,7 +20,10 @@ package bsutil
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path"
+	"slices"
+	"strings"
 
 	"github.com/blang/semver/v4"
 	"github.com/pkg/errors"
@@ -222,8 +225,17 @@ var KubeadmExtraConfigOpts = []string{
 
 // InvokeKubeadm returns the invocation command for Kubeadm
 func InvokeKubeadm(version string) string {
-	// PATH=/var/lib/minikube/binaries/v1.34.0:$PATH
-	return fmt.Sprintf("sudo env PATH=\"%s:$PATH\" kubeadm", BinRoot(version))
+	// /var/lib/minikube/binaries/v1.34.0
+	prefix := []string{BinRoot(version)}
+
+	// kuebadm try to find losetup in the path since
+	// https://github.com/kubernetes/kubernetes/pull/129450
+	paths := strings.Split(os.Getenv("PATH"), ":")
+	if !slices.Contains(paths, "/usr/sbin") {
+		prefix = append(prefix, "/usr/sbin")
+	}
+
+	return fmt.Sprintf("sudo env PATH=\"%s:$PATH\" kubeadm", strings.Join(prefix, ":"))
 }
 
 // EtcdDataDir is where etcd data is stored.
