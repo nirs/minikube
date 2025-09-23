@@ -174,7 +174,7 @@ func KicDriver() bool {
 
 // NeedsAuxDriver Returns true if the driver needs an auxiliary driver (kvm, hyperkit,..)
 func NeedsAuxDriver() bool {
-	return HyperVDriver() || KVMDriver()
+	return HyperVDriver()
 }
 
 // VMDriver checks if the driver is a VM
