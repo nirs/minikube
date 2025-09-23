@@ -61,10 +61,6 @@ COMMIT_NOQUOTES := $(patsubst "%",%,$(COMMIT))
 # source code for image: https://github.com/neilotoole/xcgo
 HYPERKIT_BUILD_IMAGE ?= quay.io/nirsof/xcgo:jammy-v2
 
-# NOTE: "latest" as of 2021-02-06. kube-cross images aren't updated as often as Kubernetes
-# https://github.com/kubernetes/kubernetes/blob/master/build/build-image/cross/VERSION
-#
-
 BUILD_IMAGE 	?= registry.k8s.io/build-image/kube-cross:$(GO_K8S_VERSION_PREFIX)-go$(GO_VERSION)-bullseye.0
 
 ISO_BUILD_IMAGE ?= $(REGISTRY)/buildroot-image
@@ -800,6 +796,12 @@ endif
 out/gvisor-addon: ## Build gvisor addon
 	$(if $(quiet),@echo "  GO       $@")
 	$(Q)GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $@ cmd/gvisor/gvisor.go
+
+.PHONY: minikube-cross-image
+minikube-cross-image:
+	docker login $(REGISTRY)
+	docker build -t $(REGISTRY)/minikube-cross:latest -f hack/minikube-cross/Dockerfile .
+	docker push $(REGISTRY)/minikube-cross:latest
 
 .PHONY: gvisor-addon-image
 gvisor-addon-image:
