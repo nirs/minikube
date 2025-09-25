@@ -64,6 +64,7 @@ HYPERKIT_BUILD_IMAGE ?= quay.io/nirsof/xcgo:jammy-v2
 BUILD_IMAGE 	?= registry.k8s.io/build-image/kube-cross:$(GO_K8S_VERSION_PREFIX)-go$(GO_VERSION)-bullseye.0
 
 ISO_BUILD_IMAGE ?= $(REGISTRY)/buildroot-image
+MINIKUBE_CROSS_IMAGE ?= $(REGISTRY)/minikube-cross:latest
 
 ISO_BUCKET ?= minikube/iso
 
@@ -180,7 +181,17 @@ endef
 
 # $(call DOCKER, image, command)
 define DOCKER
-	docker run --rm -e GOCACHE=/app/.cache -e IN_DOCKER=1 --user $(shell id -u):$(shell id -g) -w /app -v $(PWD):/app:Z -v $(GOPATH):/go:Z --init $(1) /bin/bash -c '$(2)'
+	docker run --rm \
+	    --env IN_DOCKER=1 \
+	    --env GOCACHE=/app/.cache/go \
+	    --env ZIG_GLOBAL_CACHE_DIR=/app/.cache/zig \
+	    --user $(shell id -u):$(shell id -g) \
+	    --workdir /app \
+	    --volume $(PWD):/app:Z \
+	    --volume $(GOPATH):/go:Z \
+	    --init \
+	    $(1) \
+	    /bin/bash -c '$(2)'
 endef
 
 ifeq ($(BUILD_IN_DOCKER),y)
@@ -273,9 +284,13 @@ else
 	go build -tags "$(MINIKUBE_BUILD_TAGS)" -ldflags="$(MINIKUBE_LDFLAGS)" -a -o $@ k8s.io/minikube/cmd/minikube
 endif
 
-out/minikube-linux-armv6: $(SOURCE_FILES) $(ASSET_FILES)
-	$(Q)GOOS=linux GOARCH=arm GOARM=6 \
+out/minikube-linux-arm64: $(SOURCE_FILES) $(ASSET_FILES)
+ifeq ($(MINIKUBE_BUILD_IN_DOCKER),y)
+	$(call DOCKER,$(MINIKUBE_CROSS_IMAGE),/usr/bin/make $@)
+else
+	GOOS=linux GOARCH=arm64 GOARM=$(GOARM) CGO_ENABLED=1 CC='zig cc -target aarch64-linux-gnu' \
 	go build -tags "$(MINIKUBE_BUILD_TAGS)" -ldflags="$(MINIKUBE_LDFLAGS)" -a -o $@ k8s.io/minikube/cmd/minikube
+endif
 
 .PHONY: e2e-linux-amd64 e2e-linux-arm64 e2e-darwin-amd64 e2e-darwin-arm64 e2e-windows-amd64.exe
 e2e-linux-amd64: out/e2e-linux-amd64 ## build end2end binary for Linux x86 64bit
