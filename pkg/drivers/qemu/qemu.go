@@ -56,6 +56,7 @@ const (
 	isoFilename        = "boot2docker.iso"
 	serialFileName     = "serial.log"
 	privateNetworkName = "docker-machines"
+	logFileName        = "qemu.log"
 
 	defaultSSHUser = "docker"
 )
@@ -492,13 +493,17 @@ func (d *Driver) Start() error {
 		startCmd = append([]string{d.SocketVMNetPath, d.Program}, startCmd...)
 	}
 
-	startFunc := cmdOutErr
-	if runtime.GOOS == "windows" {
-		startFunc = cmdStart
+	cmd := exec.Command(startProgram, startCmd...)
+
+	logfile, err := d.openLogfile()
+	if err != nil {
+		return fmt.Errorf("failed to open qemu logfile: %w", err)
 	}
-	if stdout, stderr, err := startFunc(startProgram, startCmd...); err != nil {
-		fmt.Printf("OUTPUT: %s\n", stdout)
-		fmt.Printf("ERROR: %s\n", stderr)
+	defer logfile.Close()
+	cmd.Stderr = logfile
+
+	log.Debugf("executing: %s", cmd)
+	if err := cmd.Start(); err != nil {
 		return err
 	}
 
@@ -544,6 +549,11 @@ func (d *Driver) Start() error {
 	}
 
 	return common.WaitForSSHAccess(fmt.Sprintf("%s:%d", d.IPAddress, d.SSHPort), time.Second)
+}
+
+func (d *Driver) openLogfile() (*os.File, error) {
+	logfile := d.ResolveStorePath(logFileName)
+	return os.OpenFile(logfile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 }
 
 func hardwareAcceleration() string {
@@ -593,12 +603,6 @@ func cmdOutErr(cmdStr string, args ...string) (string, string, error) {
 		}
 	}
 	return stdoutStr, stderrStr, err
-}
-
-func cmdStart(cmdStr string, args ...string) (string, string, error) {
-	cmd := exec.Command(cmdStr, args...)
-	log.Debugf("executing: %s %s", cmdStr, strings.Join(args, " "))
-	return "", "", cmd.Start()
 }
 
 func (d *Driver) Stop() error {
