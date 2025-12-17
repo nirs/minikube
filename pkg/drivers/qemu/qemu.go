@@ -454,11 +454,6 @@ func (d *Driver) Start() error {
 		return fmt.Errorf("unknown network: %s", d.Network)
 	}
 
-	if runtime.GOOS != "windows" {
-		startCmd = append(startCmd,
-			"-daemonize")
-	}
-
 	if d.CloudConfigRoot != "" {
 		startCmd = append(startCmd,
 			"-fsdev",

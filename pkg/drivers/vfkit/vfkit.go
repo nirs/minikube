@@ -31,7 +31,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/docker/machine/libmachine/drivers"
@@ -330,10 +329,6 @@ func (d *Driver) startVfkit(socketPath string) error {
 	log.Debugf("executing: vfkit %s", strings.Join(startCmd, " "))
 	os.Remove(d.sockfilePath())
 	cmd := exec.Command("vfkit", startCmd...)
-
-	// Create vfkit in a new process group, so minikube caller can use killpg
-	// to terminate the entire process group without harming the vfkit process.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	logfile, err := d.openLogfile()
 	if err != nil {

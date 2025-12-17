@@ -29,7 +29,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/docker/machine/libmachine/drivers"
@@ -252,10 +251,6 @@ func (d *Driver) startKrunkit(socketPath string) error {
 
 	log.Debugf("executing: krunkit %s", strings.Join(args, " "))
 	cmd := exec.Command(driverName, args...)
-
-	// Create krunkit in a new process group, so minikube caller can use killpg
-	// to terminate the entire process group without harming the krunkit process.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	logfile, err := d.openLogfile()
 	if err != nil {
