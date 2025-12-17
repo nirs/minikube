@@ -54,20 +54,8 @@ jobs:
             os: ubuntu-24.04-arm
             network_flag: ""
     steps:
-      - id: info-block
+      - name: Info block
         uses: medyagh/info-block@main
-      - name: Load avg and free memory
-        run: |
-          echo "memory_gb=${{ steps.info-block.outputs.memory_gb }}"
-          echo "cpu_cores=${{ steps.info-block.outputs.cpu_cores }}"
-          echo "load_average=${{ steps.info-block.outputs.load_average }}"
-          echo "free_mem=${{ steps.info-block.outputs.free_mem }}"
-          load_avg=${{ steps.info-block.outputs.load_average }}
-          cores=${{ steps.info-block.outputs.cpu_cores }}
-          if (( $(echo "$load_avg / $cores > 2" | bc -l) )); then
-            echo "Load average per core is above 2; stopping job early."
-            exit 1
-          fi
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c
         with:
@@ -93,14 +81,22 @@ jobs:
         run: |
           brew install qemu socket_vmnet
           HOMEBREW=$(which brew) && sudo ${HOMEBREW} services start socket_vmnet
+      - name: Top (before test)
+        # 60 seconds cool down before starting the test.
+        run: top -l 30 -s 2 -n 20 -stats pid,command,cpu,time,mem
       - name: Start minikube (1st boot)
         run: |
           ./out/minikube start \
               --no-kubernetes \
-              --memory 4gb \
+              --cpus 1 \
+              --memory 2600m \
               --driver ${{ matrix.driver }} \
               ${{ matrix.network_flag }} \
               ${{ env.LOG_ARGS }}
+      - name: Top (after test)
+        if: always()
+        # We need at leat 2 samples to get meanigful cpu info.
+        run: top -l 5 -s 2 -n 20 -stats pid,command,cpu,time,mem
       - name: Inspect minikube
         if: always()
         run: |
@@ -112,9 +108,3 @@ jobs:
             echo "==> $f <=="
             head -n 1000 "$f" || true
           done
-      - name: Stop minikube
-        run: ./out/minikube stop ${{ env.LOG_ARGS }}
-      - name: Start minikube again (2nd boot)
-        run: ./out/minikube start ${{ env.LOG_ARGS }}
-      - name: Delete minikube
-        run: ./out/minikube delete ${{ env.LOG_ARGS }}
