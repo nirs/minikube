@@ -63,6 +63,11 @@ jobs:
           sudo mdutil -a -i off
           # Erase Existing Indexes
           sudo mdutil -E /
+      - name: Disable macOS firewall (macos)
+        if: contains(matrix.os, 'macos')
+        run: |
+          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
+          sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode off
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c
         with:
