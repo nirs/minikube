@@ -93,9 +93,16 @@ jobs:
         run: |
           brew install qemu socket_vmnet
           HOMEBREW=$(which brew) && sudo ${HOMEBREW} services start socket_vmnet
-      - name: Top (before test)
-        # 60 seconds cool down before starting the test.
-        run: top -l 30 -s 2 -n 20 -stats pid,command,cpu,time,mem
+      - name: Inspect host (before)
+        run: |
+          if [ "$(uname)" = "Darwin" ]; then
+            echo "=== Top ==="
+            top -l 2 -s 10 -n 20 -stats pid,command,cpu,time,mem
+            echo "=== Interfaces ==="
+            ifconfig -u
+            echo "=== Routing table ===="
+            netstat -rn -f inet
+          fi
       - name: Start minikube (1st boot)
         run: |
           ./out/minikube start \
@@ -105,10 +112,17 @@ jobs:
               --driver ${{ matrix.driver }} \
               ${{ matrix.network_flag }} \
               ${{ env.LOG_ARGS }}
-      - name: Top (after test)
+      - name: Inspect host (after)
         if: always()
-        # We need at leat 2 samples to get meanigful cpu info.
-        run: top -l 5 -s 2 -n 20 -stats pid,command,cpu,time,mem
+        run: |
+          if [ "$(uname)" = "Darwin" ]; then
+            echo "=== Top ==="
+            top -l 2 -s 10 -n 20 -stats pid,command,cpu,time,mem
+            echo "=== Interfaces ==="
+            ifconfig -u
+            echo "=== Routing table ===="
+            netstat -rn -f inet
+          fi
       - name: Inspect minikube
         if: always()
         run: |
