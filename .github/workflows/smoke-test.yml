@@ -68,6 +68,15 @@ jobs:
         run: |
           sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
           sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode off
+      - name: Clean up network state (macos)
+        if: contains(matrix.os, 'macos')
+        run: |
+          # Delete the bridge, it will be created by vment.
+          sudo ifconfig bridge100 destroy || true
+          # Flush the routing table to remove possible '!' (Reject) flags.
+          sudo route -n flush
+          # Ensure no stale ARP entries exist
+          sudo arp -ad
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c
         with:
