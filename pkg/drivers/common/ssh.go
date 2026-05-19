@@ -61,6 +61,7 @@ func WaitForSSHAccess(d drivers.Driver) error {
 	dialer := net.Dialer{Deadline: deadline}
 
 	for {
+		check := time.Now()
 		done, err := checkSSHAccess(&dialer, addr)
 		if err != nil {
 			return err
@@ -69,7 +70,12 @@ func WaitForSSHAccess(d drivers.Driver) error {
 			log.Infof("SSH server %q is accessible in %.3f seconds", addr, time.Since(start).Seconds())
 			return nil
 		}
-		time.Sleep(retryDelay)
+
+		// Some attempts may return immediately (e.g. "host is down",
+		// "connection refused"), which would turn this into a busy loop.
+		if time.Since(check) < retryDelay {
+			time.Sleep(retryDelay)
+		}
 	}
 }
 
