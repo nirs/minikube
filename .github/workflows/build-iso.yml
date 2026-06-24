@@ -1,6 +1,9 @@
 name: Build ISO
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - iso-workflow
 
 permissions:
   contents: read
