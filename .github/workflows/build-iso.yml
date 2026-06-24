@@ -1,0 +1,33 @@
+name: Build ISO
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        timeout-minutes: 1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build ISO
+        timeout-minutes: 1
+        run: |
+          echo "Building minikube ISO for ${{ matrix.arch }}"
+          echo "Runner: $(uname -m)"
+          echo "Disk space:"
+          df -h .
+          echo "CPUs: $(nproc)"
+          echo "Memory:"
+          free -h
+          echo "Build complete (stub)"
