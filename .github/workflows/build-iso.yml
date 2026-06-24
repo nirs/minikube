@@ -5,32 +5,111 @@ on:
     branches:
       - iso-workflow
 
+env:
+  BUILDROOT_BRANCH: "2025.02.14"
+
 permissions:
   contents: read
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: amd64
+            # Stock buildroot defconfig for validating the toolchain build.
+            # Will be replaced with minikube_x86_64_defconfig later.
+            br_defconfig: qemu_x86_64_defconfig
             runner: ubuntu-24.04
           - arch: arm64
+            # Stock buildroot defconfig for validating the toolchain build.
+            # Will be replaced with minikube_aarch64_defconfig later.
+            br_defconfig: qemu_aarch64_virt_defconfig
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    env:
+      BUILD_LOG: build-${{ matrix.arch }}.log
     steps:
-      - name: Checkout
-        timeout-minutes: 1
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Build ISO
+      - name: Runner info
         timeout-minutes: 1
         run: |
-          echo "Building minikube ISO for ${{ matrix.arch }}"
-          echo "Runner: $(uname -m)"
-          echo "Disk space:"
-          df -h .
+          echo "Arch: $(uname -m)"
           echo "CPUs: $(nproc)"
+          echo "Load: $(uptime)"
           echo "Memory:"
-          free -h
-          echo "Build complete (stub)"
+          free -h | sed 's/^/  /'
+          echo "Disk:"
+          df -h . | sed 's/^/  /'
+
+      - name: Install dependencies
+        timeout-minutes: 5
+        # From deploy/iso/minikube-iso/Dockerfile
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            automake \
+            bc \
+            build-essential \
+            cmake \
+            cpio \
+            gcc \
+            git \
+            gnupg2 \
+            libtool \
+            libpcre3-dev \
+            mkisofs \
+            p7zip-full \
+            python3 \
+            rsync \
+            unzip \
+            wget
+          if [ "$(uname -m)" = "x86_64" ]; then
+            sudo apt-get install -y gcc-multilib
+          fi
+
+      - name: Clone buildroot
+        timeout-minutes: 2
+        # Based on the 'buildroot' target in Makefile
+        run: |
+          mkdir -p out
+          git clone --depth=1 --branch=${{ env.BUILDROOT_BRANCH }} \
+            https://github.com/buildroot/buildroot out/buildroot
+
+      - name: Configure buildroot
+        timeout-minutes: 1
+        # Based on the 'iso-prepare-%' target in Makefile
+        run: |
+          make -C out/buildroot ${{ matrix.br_defconfig }} O=output
+
+      - name: Build toolchain
+        # TODO: tune based on actual build times
+        timeout-minutes: 120
+        run: |
+          # Full build output goes to build.log.
+          # Only >>> package status lines are shown in the workflow log.
+          set -o pipefail
+          make -C out/buildroot O=output toolchain 2>&1 \
+            | tee "$BUILD_LOG" \
+            | grep --line-buffered -E '>>>'
+
+      - name: Upload build log
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.BUILD_LOG }}
+          path: ${{ env.BUILD_LOG }}
+          retention-days: 14
+
+      - name: Build results
+        if: always()
+        timeout-minutes: 1
+        run: |
+          echo "Load: $(uptime)"
+          echo "Memory:"
+          free -h | sed 's/^/  /'
+          echo "Disk:"
+          df -h . | sed 's/^/  /'
+          echo "Build output (MB):"
+          du -sm out/buildroot/output/*/ 2>/dev/null | sort -rn | sed 's/^/  /' || true
