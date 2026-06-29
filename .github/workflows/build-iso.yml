@@ -77,6 +77,13 @@ jobs:
           git clone --depth=1 --branch=${{ env.BUILDROOT_BRANCH }} \
             https://github.com/buildroot/buildroot out/buildroot
 
+      - name: Restore download cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: out/buildroot/dl
+          key: buildroot-${{ matrix.arch }}-dl-${{ github.run_id }}
+          restore-keys: buildroot-${{ matrix.arch }}-dl-
+
       - name: Configure buildroot
         timeout-minutes: 1
         # Based on the 'iso-prepare-%' target in Makefile
@@ -93,6 +100,14 @@ jobs:
           make -C out/buildroot O=output toolchain 2>&1 \
             | tee "$BUILD_LOG" \
             | grep --line-buffered -E '>>>'
+
+      - name: Save download cache
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: out/buildroot/dl
+          # Varying key so new downloads are cached after buildroot bumps.
+          # restore-keys falls back to the most recent dl cache for this arch.
+          key: buildroot-${{ matrix.arch }}-dl-${{ github.run_id }}
 
       - name: Generate build graphs
         if: always()
