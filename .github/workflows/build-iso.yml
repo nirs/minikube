@@ -29,6 +29,7 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     env:
+      ARTIFACTS_DIR: build-${{ matrix.arch }}
       BUILD_LOG: build-${{ matrix.arch }}.log
     steps:
       - name: Runner info
@@ -93,13 +94,35 @@ jobs:
             | tee "$BUILD_LOG" \
             | grep --line-buffered -E '>>>'
 
-      - name: Upload build log
+      - name: Generate build graphs
+        if: always()
+        timeout-minutes: 2
+        run: |
+          pip3 install matplotlib numpy
+          make -C out/buildroot O=output graph-build || true
+
+      - name: Collect build artifacts
+        if: always()
+        run: |
+          tar --create \
+              --gzip \
+              --ignore-failed-read \
+              --transform "s|^out/buildroot/output/||" \
+              --transform "s|^|$ARTIFACTS_DIR/|" \
+              --file "$ARTIFACTS_DIR.tar.gz" \
+              "$BUILD_LOG" \
+              out/buildroot/output/.config \
+              out/buildroot/output/build/build-time.log \
+              out/buildroot/output/graphs
+
+      - name: Upload build artifacts
         if: always()
         timeout-minutes: 3
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ env.BUILD_LOG }}
-          path: ${{ env.BUILD_LOG }}
+          name: ${{ env.ARTIFACTS_DIR }}
+          path: ${{ env.ARTIFACTS_DIR }}.tar.gz
+          compression-level: 0
           retention-days: 14
 
       - name: Build results
