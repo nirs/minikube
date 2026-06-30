@@ -91,8 +91,11 @@ jobs:
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: out/buildroot/dl
-          key: buildroot-${{ matrix.arch }}-dl-${{ github.run_id }}
-          restore-keys: buildroot-${{ matrix.arch }}-dl-
+          # Sources are arch-independent, so both jobs share one cache.
+          # Both restore; whichever finishes first saves (the other gets
+          # a harmless duplicate-key error).
+          key: buildroot-dl-${{ github.run_id }}
+          restore-keys: buildroot-dl-
 
       - name: Restore ccache
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -135,9 +138,7 @@ jobs:
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: out/buildroot/dl
-          # Varying key so new downloads are cached after buildroot bumps.
-          # restore-keys falls back to the most recent dl cache for this arch.
-          key: buildroot-${{ matrix.arch }}-dl-${{ github.run_id }}
+          key: buildroot-dl-${{ github.run_id }}
 
       - name: Generate build graphs
         if: always()
