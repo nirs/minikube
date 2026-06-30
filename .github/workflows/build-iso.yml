@@ -18,19 +18,19 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            # Stock buildroot defconfig for validating the toolchain build.
-            # Will be replaced with minikube_x86_64_defconfig later.
-            br_defconfig: qemu_x86_64_defconfig
+            br_arch: x86_64
+            br_defconfig: minikube_x86_64_defconfig
             runner: ubuntu-24.04
           - arch: arm64
-            # Stock buildroot defconfig for validating the toolchain build.
-            # Will be replaced with minikube_aarch64_defconfig later.
-            br_defconfig: qemu_aarch64_virt_defconfig
+            br_arch: aarch64
+            br_defconfig: minikube_aarch64_defconfig
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     env:
       ARTIFACTS_DIR: build-${{ matrix.arch }}
       BUILD_LOG: build-${{ matrix.arch }}.log
+      BR2_EXTERNAL: ../../deploy/iso/minikube-iso
+      CCACHE_STATSLOG: ccache-stats.log
     steps:
       - name: Runner info
         timeout-minutes: 1
@@ -42,6 +42,9 @@ jobs:
           free -h | sed 's/^/  /'
           echo "Disk:"
           df -h . | sed 's/^/  /'
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install dependencies
         timeout-minutes: 5
@@ -77,6 +80,14 @@ jobs:
           git clone --depth=1 --branch=${{ env.BUILDROOT_BRANCH }} \
             https://github.com/buildroot/buildroot out/buildroot
 
+      - name: Patch buildroot
+        run: |
+          for p in deploy/iso/minikube-iso/patches/buildroot/*.patch; do
+            [ -f "$p" ] || continue
+            echo "Applying buildroot patch: $p"
+            (cd out/buildroot && patch -p1 -i "../../$p")
+          done
+
       - name: Restore download cache
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
@@ -84,9 +95,23 @@ jobs:
           key: buildroot-${{ matrix.arch }}-dl-${{ github.run_id }}
           restore-keys: buildroot-${{ matrix.arch }}-dl-
 
-      - name: Configure buildroot
+      - name: Restore ccache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.buildroot-ccache
+          key: buildroot-${{ matrix.arch }}-ccache-${{ github.run_id }}
+          restore-keys: buildroot-${{ matrix.arch }}-ccache-
+
+      # Based on the 'iso-prepare-%' target in Makefile.
+      # TODO: replace arch-specific Config.in.tmpl files with a single
+      # Config.in using Kconfig arch conditionals, then remove this step.
+      - name: Prepare buildroot
+        run: |
+          cp deploy/iso/minikube-iso/arch/${{ matrix.br_arch }}/Config.in.tmpl \
+             deploy/iso/minikube-iso/Config.in
+
+      - name: Load buildroot defconfig
         timeout-minutes: 1
-        # Based on the 'iso-prepare-%' target in Makefile
         run: |
           make -C out/buildroot ${{ matrix.br_defconfig }} O=output
 
@@ -100,6 +125,12 @@ jobs:
           make -C out/buildroot O=output toolchain 2>&1 \
             | tee "$BUILD_LOG" \
             | grep --line-buffered -E '>>>'
+
+      - name: Save ccache
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.buildroot-ccache
+          key: buildroot-${{ matrix.arch }}-ccache-${{ github.run_id }}
 
       - name: Save download cache
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -126,6 +157,7 @@ jobs:
               --transform "s|^|$ARTIFACTS_DIR/|" \
               --file "$ARTIFACTS_DIR.tar.gz" \
               "$BUILD_LOG" \
+              "$CCACHE_STATSLOG" \
               out/buildroot/output/.config \
               out/buildroot/output/build/build-time.log \
               out/buildroot/output/graphs
@@ -151,3 +183,10 @@ jobs:
           df -h . | sed 's/^/  /'
           echo "Build output (MB):"
           du -sm out/buildroot/output/*/ 2>/dev/null | sort -rn | sed 's/^/  /' || true
+          # The stats log is created by buildroot's ccache binary, so if
+          # the log exists, the binary exists too.
+          if [ -f "$CCACHE_STATSLOG" ]; then
+            echo ""
+            echo "ccache stats:"
+            out/buildroot/output/host/bin/ccache --show-log-stats
+          fi
