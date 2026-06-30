@@ -30,7 +30,6 @@ jobs:
       ARTIFACTS_DIR: build-${{ matrix.arch }}
       BUILD_LOG: build-${{ matrix.arch }}.log
       BR2_EXTERNAL: ../../deploy/iso/minikube-iso
-      CCACHE_STATSLOG: ccache-stats.log
     steps:
       - name: Runner info
         timeout-minutes: 1
@@ -157,7 +156,6 @@ jobs:
               --transform "s|^|$ARTIFACTS_DIR/|" \
               --file "$ARTIFACTS_DIR.tar.gz" \
               "$BUILD_LOG" \
-              "$CCACHE_STATSLOG" \
               out/buildroot/output/.config \
               out/buildroot/output/build/build-time.log \
               out/buildroot/output/graphs
@@ -183,10 +181,8 @@ jobs:
           df -h . | sed 's/^/  /'
           echo "Build output (MB):"
           du -sm out/buildroot/output/*/ 2>/dev/null | sort -rn | sed 's/^/  /' || true
-          # The stats log is created by buildroot's ccache binary, so if
-          # the log exists, the binary exists too.
-          if [ -f "$CCACHE_STATSLOG" ]; then
+          if [ -x out/buildroot/output/host/bin/ccache ]; then
             echo ""
             echo "ccache stats:"
-            out/buildroot/output/host/bin/ccache --show-log-stats
+            out/buildroot/output/host/bin/ccache -s
           fi
