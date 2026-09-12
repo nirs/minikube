@@ -1,0 +1,189 @@
+name: Build ISO
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - iso-workflow
+
+env:
+  BUILDROOT_BRANCH: "2025.02.14"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            br_arch: x86_64
+            br_defconfig: minikube_x86_64_defconfig
+            runner: ubuntu-24.04
+          - arch: arm64
+            br_arch: aarch64
+            br_defconfig: minikube_aarch64_defconfig
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      ARTIFACTS_DIR: build-${{ matrix.arch }}
+      BUILD_LOG: build-${{ matrix.arch }}.log
+      BR2_EXTERNAL: ../../deploy/iso/minikube-iso
+    steps:
+      - name: Runner info
+        timeout-minutes: 1
+        run: |
+          echo "Arch: $(uname -m)"
+          echo "CPUs: $(nproc)"
+          echo "Load: $(uptime)"
+          echo "Memory:"
+          free -h | sed 's/^/  /'
+          echo "Disk:"
+          df -h . | sed 's/^/  /'
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install dependencies
+        timeout-minutes: 5
+        # From deploy/iso/minikube-iso/Dockerfile
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            automake \
+            bc \
+            build-essential \
+            cmake \
+            cpio \
+            gcc \
+            git \
+            gnupg2 \
+            libtool \
+            libpcre3-dev \
+            mkisofs \
+            p7zip-full \
+            python3 \
+            rsync \
+            unzip \
+            wget
+          if [ "$(uname -m)" = "x86_64" ]; then
+            sudo apt-get install -y gcc-multilib
+          fi
+
+      - name: Clone buildroot
+        timeout-minutes: 2
+        # Based on the 'buildroot' target in Makefile
+        run: |
+          mkdir -p out
+          git clone --depth=1 --branch=${{ env.BUILDROOT_BRANCH }} \
+            https://github.com/buildroot/buildroot out/buildroot
+
+      - name: Patch buildroot
+        run: |
+          for p in deploy/iso/minikube-iso/patches/buildroot/*.patch; do
+            [ -f "$p" ] || continue
+            echo "Applying buildroot patch: $p"
+            (cd out/buildroot && patch -p1 -i "../../$p")
+          done
+
+      - name: Restore download cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: out/buildroot/dl
+          # Sources are arch-independent, so both jobs share one cache.
+          # Both restore; whichever finishes first saves (the other gets
+          # a harmless duplicate-key error).
+          key: buildroot-dl-${{ github.run_id }}
+          restore-keys: buildroot-dl-
+
+      - name: Restore ccache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.buildroot-ccache
+          key: buildroot-${{ matrix.arch }}-ccache-${{ github.run_id }}
+          restore-keys: buildroot-${{ matrix.arch }}-ccache-
+
+      # Based on the 'iso-prepare-%' target in Makefile.
+      # TODO: replace arch-specific Config.in.tmpl files with a single
+      # Config.in using Kconfig arch conditionals, then remove this step.
+      - name: Prepare buildroot
+        run: |
+          cp deploy/iso/minikube-iso/arch/${{ matrix.br_arch }}/Config.in.tmpl \
+             deploy/iso/minikube-iso/Config.in
+
+      - name: Load buildroot defconfig
+        timeout-minutes: 1
+        run: |
+          make -C out/buildroot ${{ matrix.br_defconfig }} O=output
+
+      - name: Build toolchain
+        # TODO: tune based on actual build times
+        timeout-minutes: 120
+        run: |
+          # Full build output goes to build.log.
+          # Only >>> package status lines are shown in the workflow log.
+          set -o pipefail
+          make -C out/buildroot O=output toolchain 2>&1 \
+            | tee "$BUILD_LOG" \
+            | grep --line-buffered -E '>>>'
+
+      - name: Save ccache
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.buildroot-ccache
+          key: buildroot-${{ matrix.arch }}-ccache-${{ github.run_id }}
+
+      - name: Save download cache
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: out/buildroot/dl
+          key: buildroot-dl-${{ github.run_id }}
+
+      - name: Generate build graphs
+        if: always()
+        timeout-minutes: 2
+        run: |
+          pip3 install matplotlib numpy
+          make -C out/buildroot O=output graph-build || true
+
+      - name: Collect build artifacts
+        if: always()
+        run: |
+          tar --create \
+              --gzip \
+              --ignore-failed-read \
+              --transform "s|^out/buildroot/output/||" \
+              --transform "s|^|$ARTIFACTS_DIR/|" \
+              --file "$ARTIFACTS_DIR.tar.gz" \
+              "$BUILD_LOG" \
+              out/buildroot/output/.config \
+              out/buildroot/output/build/build-time.log \
+              out/buildroot/output/graphs
+
+      - name: Upload build artifacts
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.ARTIFACTS_DIR }}
+          path: ${{ env.ARTIFACTS_DIR }}.tar.gz
+          compression-level: 0
+          retention-days: 14
+
+      - name: Build results
+        if: always()
+        timeout-minutes: 1
+        run: |
+          echo "Load: $(uptime)"
+          echo "Memory:"
+          free -h | sed 's/^/  /'
+          echo "Disk:"
+          df -h . | sed 's/^/  /'
+          echo "Build output (MB):"
+          du -sm out/buildroot/output/*/ 2>/dev/null | sort -rn | sed 's/^/  /' || true
+          if [ -x out/buildroot/output/host/bin/ccache ]; then
+            echo ""
+            echo "ccache stats:"
+            out/buildroot/output/host/bin/ccache -s
+          fi
