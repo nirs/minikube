@@ -40,6 +40,7 @@ COPY 02-crio.conf /etc/crio/crio.conf.d/02-crio.conf
 COPY containerd.toml /etc/containerd/config.toml
 COPY containerd_docker_io_hosts.toml /etc/containerd/certs.d/docker.io/hosts.toml
 COPY clean-install /usr/local/bin/clean-install
+COPY pin-debian-snapshot /usr/local/bin/pin-debian-snapshot
 COPY entrypoint /usr/local/bin/entrypoint
 COPY CHANGELOG ./CHANGELOG
 COPY nerdctld/nerdctl.socket /usr/local/lib/systemd/system/nerdctl.socket
@@ -69,8 +70,12 @@ COPY auto-pause-${TARGETARCH} /bin/auto-pause
 # Finally we adjust tempfiles cleanup to be 1 minute after "boot" instead of 15m
 # This is plenty after we've done initial setup for a node, but before we are
 # likely to try to export logs etc.
+# Pin Debian apt to the snapshot recorded in the base image and fetch that
+# index once. The runtime stage drops the index so it is not published.
 RUN echo "Ensuring scripts are executable ..." \
-    && chmod +x /usr/local/bin/clean-install /usr/local/bin/entrypoint \
+    && chmod +x /usr/local/bin/clean-install /usr/local/bin/pin-debian-snapshot /usr/local/bin/entrypoint \
+    && pin-debian-snapshot \
+    && apt-get update \
  && echo "Installing Packages ..." \
     && DEBIAN_FRONTEND=noninteractive clean-install \
       systemd dbus \
@@ -168,6 +173,7 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
     $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
     tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
     && clean-install docker-ce docker-ce-cli containerd.io docker-buildx-plugin
 
 # Set ulimit for containerd to match docker's default-ulimit setting
@@ -236,6 +242,7 @@ RUN export ARCH=$(dpkg --print-architecture | sed 's/ppc64el/ppc64le/') && \
             > "/etc/apt/sources.list.d/isv:cri-o:stable:${CRIO_VERSION}:build.list" && \
         curl -fsSL "https://download.opensuse.org/repositories/isv:cri-o:stable:${CRIO_VERSION}:build/deb/Release.key" \
             | gpg --dearmor --yes -o "/etc/apt/trusted.gpg.d/isv_cri-o_stable_${CRIO_VERSION}_build.gpg" && \
+        apt-get update && \
         clean-install cri-o; \
     fi
 
@@ -246,6 +253,7 @@ RUN export ARCH=$(dpkg --print-architecture) && \
     curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
     sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
     sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list && \
+    apt-get update && \
     clean-install nvidia-container-toolkit; fi
 
 # install helm
@@ -303,11 +311,6 @@ USER root
 # kind base-image entry-point expects a "kind" folder for product_name,product_uuid
 # https://github.com/kubernetes-sigs/kind/blob/master/images/base/files/usr/local/bin/entrypoint
 RUN mkdir -p /kind
-# Deleting leftovers
-RUN rm -rf \
-  /usr/share/doc/* \
-  /usr/share/man/* \
-  /usr/share/local/*
 
 # Per https://systemd.io/CONTAINER_INTERFACE/, /etc/machine-id must be present
 # but empty in a container image so it is freshly initialized on each boot.
@@ -316,9 +319,23 @@ RUN rm -rf \
 RUN truncate -s 0 /etc/machine-id && rm -f /var/lib/dbus/machine-id
 RUN echo "kic! Build: ${COMMIT_SHA} Time :$(date)" > "/kic.txt"
 
+# Drop build leftovers. The published image is this filesystem, so deleting
+# once here is enough.
+FROM kicbase AS runtime
+RUN apt-get clean \
+    && rm -rf \
+        /var/lib/apt/lists/* \
+        /var/cache/debconf/* \
+        /var/log/* \
+        /tmp/* \
+        /var/tmp/* \
+        /usr/share/doc/* \
+        /usr/share/man/* \
+        /usr/share/local/*
+
 # squash all layers into one
 FROM scratch
-COPY --from=kicbase / /
+COPY --from=runtime / /
 EXPOSE 22
 # tell systemd that it is in docker (it will check for the container env)
 # https://systemd.io/CONTAINER_INTERFACE/
