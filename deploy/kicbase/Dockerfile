@@ -23,6 +23,8 @@ ARG KICBASE_IMAGE="debian:trixie-20261027-slim"
 # for a kubernetes node image, it doesn't contain much we don't need.
 FROM ${KICBASE_IMAGE} AS kicbase
 
+# Testing registry creds
+
 ARG BUILDKIT_VERSION="v0.33.0"
 ARG CRIO_VERSION="v1.35"
 ARG CRICTL_VERSION="v1.35.0"
