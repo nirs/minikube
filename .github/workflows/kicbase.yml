@@ -16,9 +16,7 @@ on:
 env:
   GOPROXY: https://proxy.golang.org
   GO_VERSION: '1.27.3'
-  # TODO: linux/s390x is omitted until vim-tiny is installable on s390x again.
-  # https://github.com/kubernetes/minikube/issues/23997
-  PLATFORMS: "linux/amd64,linux/arm64,linux/ppc64le"
+  PLATFORMS: "linux/amd64,linux/arm64,linux/ppc64le,linux/s390x"
   # Configurable via GitHub Repo Settings -> Variables (vars.KICBASE_REPO & vars.KICBASE_REGISTRY).
   # Login uses secrets.REGISTRY_USER / secrets.REGISTRY_PASSWORD, shared with the toolchain and ISO builds.
   KICBASE_REPO: ${{ inputs.repo || vars.KICBASE_REPO || 'docker.io/kicbase/build' }}
