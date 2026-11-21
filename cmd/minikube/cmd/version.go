@@ -18,6 +18,8 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"os/exec"
 	"slices"
@@ -46,6 +48,15 @@ type versionInfo struct {
 	Version    string
 	Commit     string
 	Components map[string]string
+}
+
+type versionError struct {
+	kind    reason.Kind
+	message string
+}
+
+func (e *versionError) Error() string {
+	return e.message
 }
 
 // values returns the machine-readable version data. Values are interface{}
@@ -105,39 +116,62 @@ var versionCmd = &cobra.Command{
 
 		}
 
-		switch versionOutput {
-		case "":
-			if !shortVersion {
-				out.Ln("minikube version: %v", info.Version)
-				if info.Commit != "" {
-					out.Ln("commit: %v", info.Commit)
-				}
-				keys := slices.Sorted(maps.Keys(info.Components))
-				for _, k := range keys {
-					v := info.Components[k]
-					if v != "" {
-						out.Ln("\n%s:\n%s", k, v)
-					}
-				}
-			} else {
-				out.Ln("%v", info.Version)
+		output, err := formatVersion(info, versionOutput, shortVersion)
+		if err != nil {
+			var versionErr *versionError
+			if !errors.As(err, &versionErr) {
+				exit.Error(reason.InternalOutputUsage, "version failure", err)
 			}
-		case "json":
-			json, err := json.Marshal(info.values())
-			if err != nil {
-				exit.Error(reason.InternalJSONMarshal, "version json failure", err)
-			}
-			out.Ln(string(json))
-		case "yaml":
-			yaml, err := yaml.Marshal(info.values())
-			if err != nil {
-				exit.Error(reason.InternalYamlMarshal, "version yaml failure", err)
-			}
-			out.Ln(string(yaml))
-		default:
-			exit.Message(reason.InternalOutputUsage, "error: --output must be 'yaml' or 'json'")
+			exit.Message(versionErr.kind, versionErr.message)
 		}
+		out.String(output)
 	},
+}
+
+// formatVersion returns the complete command output for the given data and
+// options. It does not read flags or global state, and it does not exit.
+func formatVersion(info versionInfo, output string, short bool) (string, error) {
+	switch output {
+	case "":
+		if short {
+			return info.Version + "\n", nil
+		}
+		var buf strings.Builder
+		fmt.Fprintf(&buf, "minikube version: %v\n", info.Version)
+		if info.Commit != "" {
+			fmt.Fprintf(&buf, "commit: %v\n", info.Commit)
+		}
+		for _, key := range slices.Sorted(maps.Keys(info.Components)) {
+			value := info.Components[key]
+			if value != "" {
+				fmt.Fprintf(&buf, "\n%s:\n%s\n", key, value)
+			}
+		}
+		return buf.String(), nil
+	case "json":
+		b, err := json.Marshal(info.values())
+		if err != nil {
+			return "", &versionError{
+				kind:    reason.InternalJSONMarshal,
+				message: fmt.Sprintf("version json failure: %v", err),
+			}
+		}
+		return string(b) + "\n", nil
+	case "yaml":
+		b, err := yaml.Marshal(info.values())
+		if err != nil {
+			return "", &versionError{
+				kind:    reason.InternalYamlMarshal,
+				message: fmt.Sprintf("version yaml failure: %v", err),
+			}
+		}
+		return string(b) + "\n", nil
+	default:
+		return "", &versionError{
+			kind:    reason.InternalOutputUsage,
+			message: "error: --output must be 'yaml' or 'json'",
+		}
+	}
 }
 
 func init() {
