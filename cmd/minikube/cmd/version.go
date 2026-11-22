@@ -165,7 +165,7 @@ func formatVersion(info versionInfo, output string, short bool) (string, error) 
 				message: fmt.Sprintf("version yaml failure: %v", err),
 			}
 		}
-		return string(b) + "\n", nil
+		return string(b), nil
 	default:
 		return "", &versionError{
 			kind:    reason.InternalOutputUsage,
