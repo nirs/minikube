@@ -136,18 +136,26 @@ func formatVersion(info versionInfo, output string, short bool) (string, error) 
 		if short {
 			return info.Version + "\n", nil
 		}
-		var buf strings.Builder
-		fmt.Fprintf(&buf, "minikube version: %v\n", info.Version)
+		ordered := yaml.MapSlice{
+			{Key: "minikube version", Value: info.Version},
+		}
 		if info.Commit != "" {
-			fmt.Fprintf(&buf, "commit: %v\n", info.Commit)
+			ordered = append(ordered, yaml.MapItem{Key: "commit", Value: info.Commit})
 		}
 		for _, key := range slices.Sorted(maps.Keys(info.Components)) {
 			value := info.Components[key]
 			if value != "" {
-				fmt.Fprintf(&buf, "%s: %s\n", key, value)
+				ordered = append(ordered, yaml.MapItem{Key: key, Value: value})
 			}
 		}
-		return buf.String(), nil
+		b, err := yaml.Marshal(ordered)
+		if err != nil {
+			return "", &versionError{
+				kind:    reason.InternalYamlMarshal,
+				message: fmt.Sprintf("version yaml failure: %v", err),
+			}
+		}
+		return string(b), nil
 	case "json":
 		b, err := json.Marshal(info.values())
 		if err != nil {
